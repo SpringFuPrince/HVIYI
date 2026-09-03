@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/api/backend.ts","./src/components/appshell.tsx","./src/components/brand.tsx","./src/components/createmeetingdialog.tsx","./src/pages/homepage.tsx","./src/pages/livemeetingpage.tsx","./src/pages/meetingspage.tsx","./src/pages/ragpage.tsx"],"version":"5.9.3"}
