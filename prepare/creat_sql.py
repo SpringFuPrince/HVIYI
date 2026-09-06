@@ -7,8 +7,6 @@
 ``create_all`` 只创建缺失表，不会删除表，也不会修改已有表结构。
 """
 
-from __future__ import annotations
-
 import asyncio
 import sys
 from pathlib import Path

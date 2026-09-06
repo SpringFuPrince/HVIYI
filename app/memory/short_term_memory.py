@@ -1,9 +1,37 @@
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-
 from app.db.memory_models import ChatMessage, SessionMemoryState, utc_now
 from app.memory.models import ChatMessageContent, MemoryKind, MemoryResponse
+from app.conf.redis_config import redis_config
+from app.memory.cache_utils import cache_aside,invalidate_cache,build_l1_summary_cache_key
 
+
+
+
+def _l1_summary_cache_key(_self, scope) -> str | None:
+    """
+    生成L1滚动摘要缓存key
+    """
+    if not scope.session_id:
+        return None
+    return build_l1_summary_cache_key( scope.meeting_id, scope.session_id )
+
+
+def _l1_summary_invalidation(
+    _result,
+    _self,
+    scope,
+    summary: str,
+    summarized_through_sequence_id: int,
+    expected_version: int,
+) -> list[str]:
+    """
+    获取需要删除的L1滚动摘要缓存key
+    """
+    if not scope.session_id:
+        return []
+
+    return [build_l1_summary_cache_key(scope.meeting_id, scope.session_id)]
 
 
 # L1 短期记忆层，存储会话的原始数据和用于上下文压缩的滚动摘要
@@ -18,25 +46,32 @@ class ShortTermMemory:
 
         raise ValueError(f"L1不支持kind={request.kind.value}")
 
-
-
     async def recall(self, request):
         """
-        召回会话的原始数据或滚动摘要。
+        召回当前会话原始消息和滚动摘要
         """
 
         scope = request.scope
         if not scope.session_id:
             return MemoryResponse()
+        # 查询滚动摘要
+        summary_state = await self.recall_summary(scope)
+        summarized_through = summary_state["summarized_through_sequence_id"]
 
+        # 查询所有未被摘要的消息
+        session_messages = await self.recall_unsummarized_messages(scope,summarized_through)
+
+        return MemoryResponse(
+            session_messages=session_messages,
+            session_summary=summary_state["summary"],
+            session_summary_version=summary_state["version"],
+            session_summarized_through_sequence_id=summarized_through,
+        )
+    async def recall_unsummarized_messages(self, scope, summarized_through: int = 0) -> list[dict]:
+        """
+        查询未被摘要的原始消息
+        """
         async with self._mysql.session() as session:
-            state = await session.scalar(
-                select(SessionMemoryState).where(
-                    SessionMemoryState.meeting_id == scope.meeting_id,
-                    SessionMemoryState.session_id == scope.session_id,
-                )
-            )
-            summarized_through = state.summarized_through_sequence_id if state is not None   else 0
             result = await session.scalars(
                 select(ChatMessage)
                 .where(
@@ -47,18 +82,43 @@ class ShortTermMemory:
                 .order_by(ChatMessage.sequence_id.asc())
             )
             rows = list(result.all())
+        session_messages = [self._message_to_dict(row) for row in rows]
+        return session_messages
 
-        return MemoryResponse(
-            session_messages=[self._message_to_dict(row) for row in rows],
-            session_summary=state.summary if state is not None else "",
-            session_summary_version=state.version if state is not None else 0,
-            session_summarized_through_sequence_id=summarized_through,
-        )
 
+    @cache_aside(
+        key_builder=_l1_summary_cache_key,
+        ttl_seconds=redis_config.l1_ttl_seconds,
+    )
+    async def recall_summary(self, scope) -> dict:
+        """
+        查询并缓存当前会话的滚动摘要
+        """
+
+        async with self._mysql.session() as session:
+            state = await session.scalar(
+                select(SessionMemoryState).where(
+                    SessionMemoryState.meeting_id == scope.meeting_id,
+                    SessionMemoryState.session_id == scope.session_id,
+                )
+            )
+
+        if state is None:
+            return {
+                "summary": "",
+                "version": 0,
+                "summarized_through_sequence_id": 0,
+            }
+
+        return {
+            "summary": state.summary,
+            "version": state.version,
+            "summarized_through_sequence_id": state.summarized_through_sequence_id,
+        }
 
     async def append_message(self, request, content):
         """
-        写入会话消息
+        写入原始会话消息
         """
         scope = request.scope
 
@@ -97,9 +157,10 @@ class ShortTermMemory:
                 "sequence_id": message.sequence_id,
                 "created": True,
             }
+
     async def get_recent_messages(self, scope, limit):
         """
-        供问题改写节点直接读取最近K条消息。
+        供问题改写节点直接读取最近K条原始消息
         """
         if not scope.session_id:
             return []
@@ -123,7 +184,9 @@ class ShortTermMemory:
         return [self._message_to_dict(row) for row in rows]
 
     async def get_all_messages(self, scope):
-        """按写入顺序读取当前会话全部消息，供管理或导出api接口使用。"""
+        """
+        按写入顺序读取当前会话全部原始消息，供管理或导出api接口使用
+        """
 
         if not scope.session_id:
             return []
@@ -142,6 +205,10 @@ class ShortTermMemory:
 
         return [self._message_to_dict(row) for row in rows]
 
+    @invalidate_cache(
+        _l1_summary_invalidation,
+        should_invalidate=lambda saved: saved is True, # 删除缓存的条件,返回True时删除缓存
+    )
     async def save_session_summary(
         self,
         scope,
@@ -149,7 +216,9 @@ class ShortTermMemory:
         summarized_through_sequence_id: int,
         expected_version: int,
     ) -> bool:
-        """用乐观锁保存摘要；版本已变化时返回 False，不覆盖并发结果。"""
+        """
+        用乐观锁保存原始会话滚动摘要
+        """
 
         if not scope.session_id:
             raise ValueError("保存L1滚动摘要必须提供session_id")

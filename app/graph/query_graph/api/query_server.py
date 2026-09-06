@@ -1,5 +1,4 @@
 import uuid
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -11,13 +10,7 @@ from app.db.memory_models import ChatMessage, Meeting
 from app.graph.query_graph.agent.main_graph import query_graph
 from app.graph.query_graph.agent.state import create_query_default_state
 from app.utils.logger import logger
-from app.utils.sse_utils import (
-    SSEEvent,
-    create_sse_queue,
-    get_sse_queue,
-    push_to_session,
-    sse_generator,
-)
+from app.utils.sse_utils import SSEEvent,create_sse_queue,get_sse_queue,push_to_session,sse_generator
 from app.utils.task_utils import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,

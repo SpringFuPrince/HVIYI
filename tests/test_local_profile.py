@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from app.local_server import (
+from app.api.server import (
     DEFAULT_LOCAL_DISPLAY_NAME,
     _resolve_display_name,
     get_local_profile,
@@ -61,11 +61,11 @@ class LocalProfileEndpointTest(unittest.IsolatedAsyncioTestCase):
         client = _FakeMongoClient([
             {"attribute_key": "称呼", "attribute_value": "老己同学"},
         ])
-        with patch("app.local_server.get_mongo_memory_client", return_value=client):
+        with patch("app.server.get_mongo_memory_client", return_value=client):
             self.assertEqual(await get_local_profile(), {"display_name": "老己同学"})
 
     async def test_mongo_failure_keeps_frontend_usable(self) -> None:
-        with patch("app.local_server.get_mongo_memory_client", side_effect=RuntimeError("offline")):
+        with patch("app.server.get_mongo_memory_client", side_effect=RuntimeError("offline")):
             self.assertEqual(await get_local_profile(), {"display_name": "老己"})
 
 

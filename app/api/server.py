@@ -26,6 +26,7 @@ from app.db.memory_models import (
     utc_now,
 )
 from app.graph.import_process.api.import_service import run_import_graph
+from app.memory.cache_utils import build_l4_task_cache_target, invalidate_cache
 from app.utils.logger import logger
 from app.utils.path_util import PROJECT_ROOT
 
@@ -104,6 +105,17 @@ def _task_payload(task: OfficeTask) -> dict:
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
+
+
+def _local_task_progress_invalidation(
+    result: dict,
+    *_args,
+    **_kwargs,
+) -> list[str]:
+    meeting_id = result.get("meeting_id")
+    if not meeting_id:
+        return []
+    return build_l4_task_cache_target(meeting_id)
 
 
 def _segment_payload(segment: TranscriptSegment) -> dict:
@@ -271,6 +283,7 @@ async def list_tasks(
 
 
 @router.patch("/tasks/{task_id}/progress")
+@invalidate_cache(_local_task_progress_invalidation)
 async def update_task_progress(
     task_id: str,
     request: TaskProgressRequest,

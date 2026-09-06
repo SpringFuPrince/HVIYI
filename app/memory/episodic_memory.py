@@ -4,12 +4,38 @@ from typing import Any
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 
-from app.memory.models import (
-    MeetingEpisodeContent,
-    MemoryFactContent,
-    MemoryKind,
-    MemoryResponse,
-)
+from app.conf.redis_config import redis_config
+from app.memory.models import MeetingEpisodeContent,MemoryFactContent,MemoryKind,MemoryResponse
+from app.memory.cache_utils import build_l2_episode_cache_key,build_l2_profile_cache_key,cache_aside,invalidate_cache
+
+
+def _l2_episode_cache_key(_self,request) -> str:
+    """
+    会议情景记忆缓存key
+    """
+    return build_l2_episode_cache_key(request.scope.meeting_id)
+
+
+def _l2_profile_cache_key(_self,_request) -> str:
+    """
+    用户画像缓存key
+    """
+    return build_l2_profile_cache_key()
+
+
+def _l2_episode_invalidation(_result,_self,request,content) -> list[str]:
+    """
+    需要删除的会议情景记忆缓存key列表
+    """
+    return [  build_l2_episode_cache_key(request) ]
+
+
+def _l2_profile_invalidation(_result,_self,request,content) -> list[str]:
+    """
+    需要删除的用户画像缓存key列表
+    """
+    return [build_l2_profile_cache_key()]
+
 
 
 def utc_now() -> datetime:
@@ -32,6 +58,7 @@ class EpisodicMemory:
 
         raise ValueError(f"L2不支持kind={request.kind.value}")
 
+    @invalidate_cache(_l2_episode_invalidation)
     async def save_meeting(self,request,content: MeetingEpisodeContent) -> dict:
         """
         保存会议情景记忆
@@ -75,6 +102,7 @@ class EpisodicMemory:
             "updated": result.modified_count > 0,
         }
 
+    @invalidate_cache(_l2_profile_invalidation)
     async def save_profile_attributes(self,request,content: MemoryFactContent) -> dict[str, Any]:
         """
         遍历所有画像属性，拆成多个属性文档保存
@@ -158,28 +186,68 @@ class EpisodicMemory:
 
         raise RuntimeError(f"画像属性并发更新冲突：{attribute_key}")
 
-    async def recall(self, request) -> MemoryResponse:
+    async def recall(self,request) -> MemoryResponse:
         """
-        召回当前会议情节记忆，并聚合用户的全部画像属性。
+        分别召回：
+        1. 当前会议的会议情节。
+        2. 本机用户的全局画像。
         """
-
-        meeting_document = await self._mongo.meeting_episodes.find_one(
-            {"meeting_id": request.scope.meeting_id}
-        )
-        if meeting_document:
-            meeting_document["_id"] = str(meeting_document["_id"])
-
-        cursor = self._mongo.profile_attributes.find(
-            {"attribute_key": {"$exists": True}},
-            {"attribute_key": 1, "attribute_value": 1},
-        ).sort("attribute_key", ASCENDING)
-        documents = await cursor.to_list(length=None)
-        profile = {
-            document["attribute_key"]: document.get("attribute_value")
-            for document in documents
-        }
+        meeting_document = (await self._recall_meeting(request))
+        profile = await self._recall_profile(request)
 
         return MemoryResponse(
             meeting_episode=meeting_document,
             facts=profile,
         )
+
+    @cache_aside(
+        key_builder=_l2_episode_cache_key,
+        ttl_seconds=redis_config.l2_ttl_seconds,
+    )
+    async def _recall_meeting(
+        self,
+        request,
+    ) -> dict | None:
+        meeting_document = (
+            await self._mongo.meeting_episodes.find_one(
+                {
+                    "meeting_id": request.scope.meeting_id
+                }
+            )
+        )
+
+        if meeting_document:
+            meeting_document["_id"] = str(meeting_document["_id"])
+        return meeting_document
+
+    @cache_aside(
+        key_builder=_l2_profile_cache_key,
+        ttl_seconds=redis_config.l2_ttl_seconds,
+    )
+    async def _recall_profile(
+        self,
+        _request,
+    ) -> dict[str, Any]:
+        cursor = self._mongo.profile_attributes.find(
+            # 存在 attribute_key 字段的文档
+            {
+                "attribute_key": {
+                    "$exists": True
+                }
+            },
+            # 只返回 attribute_key 和 attribute_value 字段
+            {
+                "attribute_key": 1,
+                "attribute_value": 1,
+            },
+        # 按 attribute_key 排序
+        ).sort(
+            "attribute_key",
+            ASCENDING,
+        )
+
+        documents = await cursor.to_list(length=None)
+
+        return {
+            document["attribute_key"] : document.get("attribute_value") for document in documents
+        }

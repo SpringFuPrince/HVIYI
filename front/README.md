@@ -15,7 +15,7 @@
 在项目根目录启动统一后端服务：
 
 ```powershell
-uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
 再启动前端：
@@ -52,12 +52,14 @@ ASR_CHUNK_SIZE=5,10,5
 
 这条链路不调用云端 `audio.transcriptions.create`，模型直接运行在本机。没有返回真实 ASR 文本时，会议仍可结束，但不会生成转录 Markdown 或触发其 Import Graph。
 
-## 数据隔离
+## 环境变量与接口文档
 
-MySQL 本地版表均以 `local_` 为前缀，避免修改旧多租户表。首次需要手工建表时运行：
+前端默认通过 Vite 将 `/api/import`、`/api/query` 和 `/api/local` 统一代理到 `127.0.0.1:8000`。如需连接其他后端地址，先复制环境变量示例：
 
 ```powershell
-uv run python -m scripts.create_local_schema
+Copy-Item .env.example .env.local
 ```
 
-Milvus 与 MongoDB 同样使用新的本地集合名；首次导入资料或首次查询时由对应服务初始化。
+只有以 `VITE_` 开头的变量会暴露给浏览器，不要在前端环境文件中保存 API Key、数据库密码或其他密钥。
+
+更详细的接口约定见 [`docs/FRONTEND_API.md`](docs/FRONTEND_API.md)。

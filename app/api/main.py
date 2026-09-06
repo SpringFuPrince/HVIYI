@@ -9,20 +9,25 @@ from app.clients.milvus_utils import (
 )
 from app.clients.mongo_utils import close_mongo_memory_client, get_mongo_memory_client
 from app.clients.mysql_utils import close_mysql_client, get_mysql_client
+from app.clients.redis_utils import (
+    close_redis_memory_cache,
+    initialize_redis_memory_cache,
+)
 from app.db.base import Base
 from app.graph.import_process.api.import_service import router as import_router
 from app.graph.query_graph.api.query_server import router as query_router
-from app.local_server import router as local_router
+from app.api.server import router as local_router
 from app.utils.logger import logger
 
 
-#  uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+#  uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """统一初始化三个 API 模块共用的数据库与向量服务。"""
 
     await get_mysql_client().create_all(Base.metadata)
+    await initialize_redis_memory_cache()
     try:
         await get_mongo_memory_client().initialize_indexes()
     except Exception as exc:
@@ -35,13 +40,14 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await close_redis_memory_cache()
         await close_mongo_memory_client()
         await close_async_milvus_client()
         await close_mysql_client()
 
 
 app = FastAPI(
-    title="HIVE Local Meeting Agent",
+    title="HVIYI Meeting Agent",
     description="本地单用户会议、Import Graph、Query Graph 与实时 ASR 统一服务",
     lifespan=lifespan,
 )

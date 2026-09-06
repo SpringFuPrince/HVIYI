@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import shutil
 import uuid
 from pathlib import Path
@@ -82,6 +80,7 @@ async def _update_document_status(
 
 
 async def _run_background_import(**kwargs: Any) -> None:
+    """后台运行 Import Graph，处理异常并更新任务状态。"""
     try:
         await run_import_graph(**kwargs)
     except Exception as exc:
@@ -98,8 +97,15 @@ async def upload_files(
     is_transcript: bool = Form(False),
     db: AsyncSession = Depends(get_mysql_session),
 ):
-    """上传文档并在指定会议范围内启动 Import Graph。"""
-
+    """
+    上传文档并执行import graph
+    1. 校验meeting_id并查询数据库检查是否存在
+    2. 每个文件生成一个task_id和document_id
+    3. 校验文件类型是否支持
+    4. 文件保存到临时目录
+    5. 添加MeetingDocument记录
+    6. 启动后台任务执行import graph
+    """
     clean_meeting_id = meeting_id.strip()
     if not clean_meeting_id:
         raise HTTPException(status_code=422, detail="meeting_id不能为空")

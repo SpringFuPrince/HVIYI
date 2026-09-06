@@ -6,7 +6,29 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.memory_models import OfficeTask, utc_now
-from app.memory.models import MemoryKind,MemoryResponse, OfficeTaskCreateContent, OfficeTaskUpdateContent
+from app.conf.redis_config import redis_config
+from app.memory.models import MemoryKind,MemoryResponse,OfficeTaskCreateContent,OfficeTaskUpdateContent
+from app.memory.cache_utils import build_l4_progress_cache_key,build_l4_task_cache_target,cache_aside,invalidate_cache
+
+
+
+def _l4_progress_cache_key(_self,request) -> str:
+    """
+    构建L4缓存key
+    """
+    return build_l4_progress_cache_key(request.scope.meeting_id,request.recent_limit)
+
+
+def _l4_progress_invalidation(
+    _result,
+    _self,
+    request,
+    content,
+) -> list[str]:
+    """
+    获取要删除的L4缓存key列表
+    """
+    return build_l4_task_cache_target(request.scope.meeting_id)
 
 
 def _mysql_datetime(value: datetime | None) -> datetime | None:
@@ -54,6 +76,7 @@ class OfficeProgressMemory:
 
         raise ValueError(f"L4不支持kind={request.kind.value}")
 
+    @invalidate_cache(_l4_progress_invalidation)
     async def create_task(self,request,content: OfficeTaskCreateContent) -> dict[str, Any]:
         """
         使用调用方生成的稳定 task_id 幂等创建办公任务。
@@ -105,9 +128,10 @@ class OfficeProgressMemory:
                     }
             raise
 
+    @invalidate_cache(_l4_progress_invalidation)
     async def update_task(self,request,content: OfficeTaskUpdateContent) -> dict[str, Any]:
         """
-        锁定任务行更新状态和进度
+        更新办公任务的进度和状态。
         """
 
         scope = request.scope
@@ -156,10 +180,14 @@ class OfficeProgressMemory:
                 "new_progress": content.progress,
             }
 
+    @cache_aside(
+        key_builder=_l4_progress_cache_key,
+        ttl_seconds=redis_config.l4_ttl_seconds,
+        decoder=MemoryResponse.model_validate,
+    )
     async def recall(self, request) -> MemoryResponse:
         """
         召回当前会议最近更新的办公任务
-
         """
 
         scope = request.scope
