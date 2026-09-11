@@ -24,7 +24,6 @@ class MemoryKind(str, Enum):
 
 
 
-# 记忆归属范围：meeting_id 是四层记忆共同的根边界。
 class MemoryScope(BaseModel):
     meeting_id: str = Field(min_length=1, max_length=64, description="会议ID")
     session_id: str | None = Field(
@@ -60,9 +59,13 @@ class MemoryWriteRequest(BaseModel):
 class MemoryRecallRequest(BaseModel):
     scope: MemoryScope = Field(description="记忆的归属范围")
     query: str = Field("",description="查询的文本")
+    original_query: str = Field("", description="用户本轮原始问题；L4写操作以此为事实边界")
+    turn_id: str | None = Field(default=None, description="当前对话轮次ID；用于生成稳定的L4任务ID")
     layers: set[MemoryLayer] = Field(default_factory=set,description="查询的层级")
-    recent_limit: int = Field(10,description="最近记忆的限制数量")
-    top_k: int = Field(5,description="召回的Top-K数量")
+    l3_top_k: int = Field(5, ge=1, le=50, description="L3语义召回的数量")
+    l4_recent_limit: int = Field(10, ge=1, le=100, description="L4最近任务的默认召回数量")
+    l4_top_k: int = Field(5, ge=1, le=50, description="L4语义召回的数量")
+
 
 # 返回的Memory响应体
 class MemoryResponse(BaseModel):
@@ -70,14 +73,15 @@ class MemoryResponse(BaseModel):
     session_messages: list[dict] = Field(default_factory=list)
     session_summary: str = ""
     session_summary_version: int = 0                 #
-    session_summarized_through_sequence_id: int = 0  # L1：摘要信息覆盖到的位置
+    session_summarized_through_sequence_id: int = 0  # L1 摘要信息覆盖到的位置
 
-    meeting_episode: dict | None = None  # L2：按meeting_id召回的一场会议情景信息
-    facts: dict[str, Any] = dict()  # L2：用户的所有画像信息
+    meeting_episode: dict | None = None  # L2 按meeting_id召回的一场会议情景信息
+    facts: dict[str, Any] = Field(default_factory=dict)  # L2 用户的所有画像信息
 
-    semantic_conversations: list[dict] = Field(default_factory=list)  # L3：从历史对话中语义检索到的片段
-    office_progress: list[dict] = Field(default_factory=list)  # L4：需要长期跟踪的办公任务、当前进度、负责人和截止时间
-    warnings: list[str] = Field(default_factory=list)    #记录记忆查询过程中的非致命问题，如：未找到相关记忆、记忆过期等
+    semantic_conversations: list[dict] = Field(default_factory=list)  # L3 从历史对话中语义检索到的片段
+    office_progress: list[dict] = Field(default_factory=list)  # L4 需要长期跟踪的办公任务、当前进度、负责人和截止时间
+    office_operation: dict[str, Any] | None = None  # L4 本轮创建、更新或召回的执行状态
+    warnings: list[str] = Field(default_factory=list)    # 记录记忆查询过程中的非致命问题，如：未找到相关记忆、记忆过期等
 
 
 # ===================各层记忆的content的schema==================
@@ -145,8 +149,8 @@ class OfficeTaskCreateContent(StrictModel):
     description: str | None = None # 任务的详细描述
     owner: str | None = None     # 任务的关联人
 
-    status: Literal["todo", "done", "cancelled"] = "todo"      # 任务的状态，例如：进行中、已完成、已取消
-    progress: int = Field(default=0, ge=0, le=100) # 任务进度，0-100%
+    progress: int = Field(default=0, ge=0, le=100)  # 任务进度，0-100%
+    status: Literal["todo", "done", "cancelled"] = "todo"      # 任务的状态：待办、完成、取消
 
     due_at: datetime | None = None # 任务的截止时间
 
@@ -155,7 +159,7 @@ class OfficeTaskCreateContent(StrictModel):
 class OfficeTaskUpdateContent(StrictModel):
     task_id: str             # 任务的唯一ID
     progress: int = Field(ge=0, le=100) # 任务进度，0-100%
-    status: str              # 任务的状态，例如：进行中、已完成、已取消
+    status: Literal["todo", "done", "cancelled"]
 
 
 

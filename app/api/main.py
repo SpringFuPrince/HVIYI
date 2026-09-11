@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.clients.milvus_utils import (
     close_async_milvus_client,
     initialize_conversation_memory_collection,
+    initialize_office_task_collection,
 )
 from app.clients.mongo_utils import close_mongo_memory_client, get_mongo_memory_client
 from app.clients.mysql_utils import close_mysql_client, get_mysql_client
@@ -20,7 +21,7 @@ from app.api.server import router as local_router
 from app.utils.logger import logger
 
 
-#  uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+# uvicorn app.api.main:app --host 0.0.0.0 --port 8000
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -36,6 +37,10 @@ async def lifespan(_: FastAPI):
         await initialize_conversation_memory_collection()
     except Exception as exc:
         logger.exception(f"L3历史对话集合初始化失败，服务将降级运行：{exc}")
+    try:
+        await initialize_office_task_collection()
+    except Exception as exc:
+        logger.exception(f"L4办公任务集合初始化失败，服务将降级运行：{exc}")
 
     try:
         yield

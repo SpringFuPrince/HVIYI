@@ -165,16 +165,15 @@ class MemoryManager:
 
     def _merge_response(
         self,
-        target: MemoryResponse, # 总响应
-        source: MemoryResponse, # 局部响应
+        target: MemoryResponse, # 最终返回的response
+        source: MemoryResponse, # 各层召回的response
     ):
         """
         把某一层返回的局部响应合并到总响应。
         """
-        # L1 摘要尚未覆盖的新消息
-        target.session_messages.extend(
-            source.session_messages
-        )
+        # L1 未摘要的原始消息
+        target.session_messages.extend(source.session_messages)
+        # L1 滚动摘要
         if (
             source.session_summary
             or source.session_summary_version
@@ -186,24 +185,28 @@ class MemoryManager:
                 source.session_summarized_through_sequence_id
             )
         
-        # 一次召回最多指定一场会议；后查询到的非空会议记忆覆盖空值。
+        # L2 会议情节记忆
         if source.meeting_episode is not None:
             target.meeting_episode = source.meeting_episode
 
-        # L2 本机用户画像由多个属性文档聚合为一个字典。
+        # L2 用户画像
         target.facts.update(source.facts)
         
-        # 语义对话
+        # L3 语义对话
         target.semantic_conversations.extend(
             source.semantic_conversations
         )
         
-        # 办公进度
+        # L4 办公进度
         target.office_progress.extend(
             source.office_progress
         )
+
+        # L4 办公操作的执行状态
+        if source.office_operation is not None:
+            target.office_operation = source.office_operation
         
-        # 警告
+        # 汇总各层警告信息
         target.warnings.extend(
             source.warnings
         )
@@ -229,7 +232,10 @@ def get_memory_manager() -> MemoryManager:
                         mysql_client=mysql_client,
                         milvus_client=milvus_client,
                     ),
-                    office_progress_memory=OfficeProgressMemory(mysql_client),
+                    office_progress_memory=OfficeProgressMemory(
+                        mysql_client=mysql_client,
+                        milvus_client=milvus_client,
+                    ),
                 )
 
     return _memory_manager

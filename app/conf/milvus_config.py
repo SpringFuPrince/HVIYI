@@ -14,6 +14,7 @@ class MilvusConfig:
     chunks_collection: str | None   # 存储切片的集合名称
     doc_meta_collection: str | None  # 存储文档元数据的集合名称
     conversation_memory_collection: str | None  # 存储会话记忆的集合名称
+    office_task_collection: str | None  # L4办公任务集合的集合名
     embedding_dim: int
 
 
@@ -23,5 +24,6 @@ milvus_config = MilvusConfig(
     chunks_collection=os.getenv("CHUNKS_COLLECTION"),
     doc_meta_collection=os.getenv("DOC_META_COLLECTION"),
     conversation_memory_collection=os.getenv( "CONVERSATION_MEMORY_COLLECTION" ),
+    office_task_collection=os.getenv("OFFICE_TASK_COLLECTION"),
     embedding_dim=int(os.getenv("EMBEDDING_DIM", "1024")),
 )

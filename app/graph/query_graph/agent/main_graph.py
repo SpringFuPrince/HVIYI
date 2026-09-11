@@ -1,6 +1,5 @@
 from langgraph.graph import StateGraph, END
 from app.graph.query_graph.agent.state import QueryGraphState
-# 导入所有节点函数
 from app.graph.query_graph.agent.nodes.node1_rewrite_and_intent import node_rewrite_and_intent
 from app.graph.query_graph.agent.nodes.node4_rerank import node_rerank
 from app.graph.query_graph.agent.nodes.node3_rrf import node_rrf
@@ -24,23 +23,27 @@ builder.add_node("node_build_context", node_build_context)  # 构建上下文窗
 builder.add_node("node_answer_output", node_answer_output)  # 生成
 builder.add_node("node_save_memory", node_save_memory)  # 保存记忆
 
-
 builder.set_entry_point("node_rewrite_and_intent")
 
 def route_with_intent(state: QueryGraphState):
-    intent = state.get("intent")
-    if intent == "chat":
-        return "node_build_context"
+    query_plan = state["query_plan"]
+    res = set()
+    if query_plan["query_unclear"]:
+        return "node_answer_output"
     else:
-        return "node_search_embedding", "node_search_embedding_hyde", "node_web_search_mcp"
+        if query_plan["local_retrieval"]:
+            res.update({"node_search_embedding", "node_search_embedding_hyde"})
+        if query_plan["need_web_search"]:
+            res.add("node_web_search_mcp")
+        return res if res else "node_build_context"
 
-
-# 1. 意图路由
+## 1. 意图路由
 builder.add_conditional_edges(
     "node_rewrite_and_intent",
     route_with_intent,
     {
         "node_build_context": "node_build_context",
+        "node_answer_output": "node_answer_output",
         "node_search_embedding": "node_search_embedding",
         "node_search_embedding_hyde": "node_search_embedding_hyde",
         "node_web_search_mcp": "node_web_search_mcp",
@@ -50,7 +53,6 @@ builder.add_conditional_edges(
 builder.add_edge("node_search_embedding", "node_rrf")
 builder.add_edge("node_search_embedding_hyde", "node_rrf")
 builder.add_edge("node_web_search_mcp", "node_rrf")
-
 builder.add_edge("node_rrf", "node_rerank")
 builder.add_edge("node_rerank", "node_build_context")
 builder.add_edge("node_build_context", "node_answer_output")

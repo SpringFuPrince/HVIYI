@@ -26,15 +26,16 @@ async def node_build_context(state: QueryGraphState) -> QueryGraphState:
             meeting_id=state["meeting_id"],
             session_id=state["session_id"],
         )
+        layers = state["query_plan"]["recall_layers"]
         request = MemoryRecallRequest(
             scope=scope,
+            layers=layers,
             query=query,
-            layers=set(MemoryLayer),  # L1～L4全部检索
-            top_k=5,
+            original_query=state.get("original_query", ""),
+            turn_id=state.get("turn_id"),
+            l3_top_k=5,
         )
-
-        # 如果是闲聊，没有检索，赋值为空列表
-        rag_documents = state.get("reranked_docs", []) if state.get("intent") == "office" else []
+        rag_documents = state.get("reranked_docs", [])
 
         context_manager = get_context_manager()
         result = await context_manager.build(request=request,rag_documents=rag_documents)
@@ -42,6 +43,7 @@ async def node_build_context(state: QueryGraphState) -> QueryGraphState:
         if result.memory.warnings:
             logger.warning(f"[{node_name}] 存在记忆召回警告: {result.memory.warnings}")
 
+        state["memory"] = result.memory.model_dump(mode="json")
         state["context_text"] = result.context_text
         add_done_task(state["task_id"], node_name, state.get("is_stream", False))
         return state

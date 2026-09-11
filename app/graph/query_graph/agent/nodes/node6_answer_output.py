@@ -18,10 +18,10 @@ from app.utils.task_utils import add_done_task, add_running_task, set_task_resul
 
 
 # 图片宽高必须同时达到阈值，避免输出小图标和Logo。
-MIN_IMAGE_WIDTH = 300
-MIN_IMAGE_HEIGHT = 200
+MIN_IMAGE_WIDTH = 60
+MIN_IMAGE_HEIGHT = 40
 MAX_OUTPUT_IMAGES = 6
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BYTES = 1024 * 1024
 
 MARKDOWN_IMAGE_PATTERN = re.compile(
     r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+['\"][^'\"]*['\"])?\)"
@@ -141,7 +141,9 @@ def build_image_markdown(images: list[tuple[str, str]]) -> str:
     )
 
 def extract_text(content) -> str:
-    """兼容模型返回字符串或文本内容块。"""
+    """
+    将不同模型返回数据转换为统一的文本格式
+    """
     if isinstance(content, str):
         return content
 

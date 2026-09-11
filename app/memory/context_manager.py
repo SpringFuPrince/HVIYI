@@ -1,9 +1,7 @@
 import json
 import threading
 from typing import Any
-
 from pydantic import BaseModel, Field
-
 from app.conf.lm_config import lm_config
 from app.memory.memory_manager import get_memory_manager
 from app.utils.load_prompt import load_prompt
@@ -24,7 +22,7 @@ class ContextLimits(BaseModel):
 
     conversation_chars: int = Field(default=5000, gt=0, description="L1会话模块字符预算")
     meeting_chars: int = Field(default=1000, gt=0, description="L2会议总结模块字符预算")
-    office_progress_chars: int = Field(default=2500, gt=0, description="L4办公进度模块字符预算")
+    office_progress_chars: int = Field(default=2000, gt=0, description="L4办公进度模块字符预算")
     semantic_chars: int = Field(default=1000, gt=0, description="L3语义检索模块字符预算")
     rag_chars: int = Field(default=8000, gt=0, description="RAG模块字符预算")
     recent_messages_to_keep: int = Field(default=6, ge=1, description="L1保留最近消息数")
@@ -35,11 +33,8 @@ class ContextCompressionResult(BaseModel):
     """压缩模型的结构化输出。"""
     compressed_text: str = Field(description="压缩后保留关键信息的文本")
 
-
-
 class ContextBuildResult(BaseModel):
     """ContextManager的返回值。"""
-
     context_text: str = ""
     memory: MemoryResponse = Field(default_factory=MemoryResponse)
 
@@ -55,7 +50,11 @@ class ContextManager:
         self._structured_compressor = None
         self._limits = limits or ContextLimits()
 
-    async def build(self,request: MemoryRecallRequest,rag_documents: list[dict[str, Any]] | None = None) -> ContextBuildResult:
+    async def build(
+        self,
+        request: MemoryRecallRequest,
+        rag_documents: list[dict[str, Any]] | None = None,
+    ) -> ContextBuildResult:
         """
         构建上下文
         四层记忆+RAG+prompt
@@ -87,6 +86,14 @@ class ContextManager:
             focus="保留会议总结、决定、任务、负责人、截止时间、里程碑和风险。",
         )
         self._append_section(sections, "当前会议情节记忆", meeting_text)
+
+        # L4 办公任务处理结果
+        office_operation_text = (
+            self._to_json(memory.office_operation)
+            if memory.office_operation
+            else ""
+        )
+        self._append_section(sections,"办公任务处理结果",office_operation_text)
 
         # 处理 L4 办公进度
         office_text = self._format_office_progress(memory.office_progress)

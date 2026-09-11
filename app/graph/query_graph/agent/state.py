@@ -9,7 +9,7 @@ class QueryGraphState(TypedDict, total=False):
     session_id: str
 
     # ===== 意图类型 =====
-    intent: Literal["chat", "office"]
+    query_plan: dict
 
     # ===== 当前对话轮次 =====
     turn_id: str
@@ -37,6 +37,10 @@ class QueryGraphState(TypedDict, total=False):
     answer: str
     citations: list[dict]  # 答引用的文档、Chunk、页面或时间范围
     memory_warnings: list[str]
+
+    # ===== 路由结果 =====
+    router: dict
+
 
     # ===== 控制信息 =====
     error: str

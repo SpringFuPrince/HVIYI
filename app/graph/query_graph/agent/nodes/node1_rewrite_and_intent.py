@@ -1,38 +1,33 @@
 import sys
-from typing import Literal
-
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-
 from app.conf.lm_config import lm_config
 from app.graph.query_graph.agent.state import QueryGraphState
 from app.lm.llm_utils import get_llm_client
 from app.memory.memory_manager import get_memory_manager
-from app.memory.models import MemoryScope
+from app.memory.models import MemoryScope, MemoryLayer
 from app.utils.load_prompt import load_prompt
 from app.utils.task_utils import add_running_task, add_done_task
-from dotenv import load_dotenv,find_dotenv
 from app.utils.logger import logger
-
-load_dotenv(find_dotenv())
 
 # 获取最近会话数量，用于问题重写，补充上下文信息，消除指代歧义
 RECENT_MESSAGE_LIMIT = 10
 
-class RewriteAndIntentResult(BaseModel):
-    rewritten_query: str = Field(
-        description=(
-            "结合最近会话补全指代、省略信息后,得到的完整、适合检索的问题"
-        )
-    )
 
-    intent: Literal["chat", "office"] = Field(
-        description=(
-            "识别用户意图"
-            "chat表示寒暄、闲聊"
-            "office表示询问会议、文档、任务、决定、风险、进度等办公信息"
-        )
-    )
+class QueryPlan(BaseModel):
+    recall_layers: set[MemoryLayer]
+
+    query_unclear: bool = False
+    local_retrieval: bool = True
+    need_web_search: bool = False
+
+    write_l2_portrait: bool = False
+    write_l3_conversation: bool = False
+
+class RewriteAndIntentResult(BaseModel):
+    rewritten_query: str = Field( description=("结合最近会话补全指代、省略信息后,得到的完整、适合检索的问题"))
+    query_plan: QueryPlan = Field(...,description="根据用户意图和上下文,生成的路由计划")
+
 
 def required_state_value(state,field_name) -> str:
     value = state.get(field_name)
@@ -113,7 +108,7 @@ async def node_rewrite_and_intent(state):
         result = await rewrite_and_intent(recent_messages_text, original_query)
 
         state["rewritten_query"] = result.rewritten_query.strip()
-        state["intent"] = result.intent
+        state["query_plan"] = result.query_plan.model_dump(mode="json")
 
         add_done_task(state["task_id"], node_name, state.get("is_stream", False))
         return state
@@ -123,6 +118,4 @@ async def node_rewrite_and_intent(state):
         raise
     finally:
         logger.info(f">>> [{node_name}]节点执行完成")
-
-
 

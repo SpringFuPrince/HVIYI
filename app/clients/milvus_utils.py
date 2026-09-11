@@ -13,8 +13,9 @@ from app.utils.logger import logger
 # 全局Milvus客户端实例，实现单例复用
 _milvus_client = None
 _async_milvus_client = None
-_conversation_memory_init_lock = None
+_init_lock = None
 _conversation_memory_initialized = False
+_office_task_initialized = False
 
 
 def get_milvus_client():
@@ -58,20 +59,20 @@ def get_async_milvus_client() -> AsyncMilvusClient:
 
 
 async def initialize_conversation_memory_collection() -> None:
-    """应用启动时创建L3历史对话集合和稠密向量索引和稀疏向量索引。"""
+    """应用启动时创建L3历史对话集合和稠密向量索引和稀疏向量索引"""
 
-    global _conversation_memory_init_lock, _conversation_memory_initialized
+    global _init_lock, _conversation_memory_initialized
 
     if _conversation_memory_initialized:
         return
-    if _conversation_memory_init_lock is None:
-        _conversation_memory_init_lock = asyncio.Lock()
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
 
     collection_name = milvus_config.conversation_memory_collection
     if not collection_name:
         raise ValueError("缺少CONVERSATION_MEMORY_COLLECTION环境变量配置")
 
-    async with _conversation_memory_init_lock:
+    async with _init_lock:
         if _conversation_memory_initialized:
             return
 
@@ -96,16 +97,8 @@ async def initialize_conversation_memory_collection() -> None:
                 "dense_vector",
                 "sparse_vector",
             }
-            if not expected_fields.issubset(field_names) or {
-                "tenant_id",
-                "user_id",
-            } & field_names:
-                raise RuntimeError(
-                    "L3历史对话集合仍是旧版Schema，请迁移或重建集合："
-                    f"{collection_name}"
-                )
             _conversation_memory_initialized = True
-            logger.info(f"L3历史对话集合已存在：{collection_name}")
+            logger.info(f"L3历史对话集合已初始化：{collection_name}")
             return
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
@@ -160,6 +153,92 @@ async def initialize_conversation_memory_collection() -> None:
         logger.info(f"L3历史对话集合创建成功：{collection_name}")
 
 
+async def initialize_office_task_collection() -> None:
+    """应用启动时创建L4办公任务集合和稠密向量索引和稀疏向量索引。"""
+
+    global _init_lock, _office_task_initialized
+
+    if _office_task_initialized:
+        return
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
+
+    collection_name = milvus_config.office_task_collection
+    if not collection_name:
+        raise ValueError("缺少OFFICE_TASK_COLLECTION环境变量配置")
+
+    async with _init_lock:
+        if _office_task_initialized:
+            return
+
+        client = get_async_milvus_client()
+        if await client.has_collection(collection_name=collection_name):
+            description = await client.describe_collection(
+                collection_name=collection_name
+            )
+            field_names = {
+                field.get("name") or field.get("field_name")
+                for field in description.get("fields", [])
+                if isinstance(field, dict)
+            }
+            expected_fields = {
+                "task_id",
+                "meeting_id",
+                "title",
+                "dense_vector",
+                "sparse_vector",
+            }
+            if not expected_fields.issubset(field_names):
+                raise RuntimeError(
+                    "L4办公任务集合Schema不兼容，请迁移或重建集合："
+                    f"{collection_name}"
+                )
+            _office_task_initialized = True
+            logger.info(f"L4办公任务集合已初始化：{collection_name}")
+            return
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("task_id", DataType.VARCHAR, is_primary=True, max_length=64)
+        schema.add_field("meeting_id", DataType.VARCHAR, max_length=64)
+        schema.add_field("title", DataType.VARCHAR, max_length=1024)
+        schema.add_field(
+            "dense_vector",
+            DataType.FLOAT_VECTOR,
+            dim=milvus_config.embedding_dim,
+        )
+        schema.add_field(
+            "sparse_vector",
+            datatype=DataType.SPARSE_FLOAT_VECTOR,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="meeting_id",
+            index_name="office_task_meeting_id_index",
+            index_type="INVERTED",
+        )
+        index_params.add_index(
+            field_name="dense_vector",
+            index_name="office_task_dense_vector_index",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 32, "efConstruction": 300},
+        )
+        index_params.add_index(
+            field_name="sparse_vector",
+            index_type="SPARSE_INVERTED_INDEX",
+            index_name="office_task_sparse_vector_index",
+            metric_type="IP",
+            params={"inverted_index_algo": "DAAT_MAXSCORE"},
+        )
+        await client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
+        _office_task_initialized = True
+        logger.info(f"L4办公任务集合创建成功：{collection_name}")
+
 async def async_milvus_health_check() -> bool:
     try:
         await get_async_milvus_client().list_collections()
@@ -171,11 +250,12 @@ async def async_milvus_health_check() -> bool:
 
 async def close_async_milvus_client() -> None:
     global _async_milvus_client
-    global _conversation_memory_init_lock, _conversation_memory_initialized
+    global _init_lock, _conversation_memory_initialized, _office_task_initialized
     client = _async_milvus_client
     _async_milvus_client = None
-    _conversation_memory_init_lock = None
+    _init_lock = None
     _conversation_memory_initialized = False
+    _office_task_initialized = False
     if client is not None:
         await client.close()
 

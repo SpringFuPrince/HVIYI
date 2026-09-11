@@ -68,7 +68,7 @@ if __name__ == '__main__':
     load_dotenv()
     test_state = {
         "task_id":"mcp_01",
-        "rewritten_query": "宇树科技上市",
+        "rewritten_query": "AI Agent",
         "is_stream":True
     }
 

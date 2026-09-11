@@ -181,7 +181,7 @@ class SemanticMemory:
                 "params": {"drop_ratio_search": 0.2},
             },
             expr=filter_expression,
-            limit=request.top_k,
+            limit=request.l3_top_k,
         )
         search_result = await async_hybrid_search(
             client=self._milvus,
@@ -189,7 +189,7 @@ class SemanticMemory:
             reqs=search_requests,
             ranker_weights=(0.5, 0.5),
             norm_score=True,
-            limit=request.top_k,
+            limit=request.l3_top_k,
             output_fields=[
                 "user_message_id",
                 "assistant_message_id",
